@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "it is a security-focused authentication and authorization service built with Node.js, Express, JWT, and Redis.",
   "main": "index.js",
-  "type":"module",
+  "type": "module",
   "scripts": {
     "dev": "node --loader ts-node/esm src/server.ts",
     "build": "tsc",
@@ -12,8 +12,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "body-parser": "^2.2.2",
     "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.1",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "nodemon": "^3.1.11",
@@ -25,8 +27,9 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.9",
     "bcrypt": "^6.0.0",
+    "drizzle-kit": "^0.31.8",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
- 
 }
