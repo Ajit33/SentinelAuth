@@ -14,3 +14,11 @@ export async function register(name: string, age: number, email: string, passwor
 
   return { message: "User registered successfully" };
 }
+
+export async function login(email:string,password:string){
+    try {
+      
+    } catch (error) {
+      
+    }
+}
