@@ -4,7 +4,7 @@ import { SignupRateLimiter } from "./middleware/ratelimiter.js";
 
 const router = Router();
 router.post("/register",SignupRateLimiter(5, 15 * 60), authController.register);
-// router.post("/login",)
+router.post("/login",authController.login);
 
 export default router;
 
