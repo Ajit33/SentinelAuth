@@ -1,142 +1,161 @@
-SentinelAuth
+# SentinelAuth
 
-A backend-focused authentication and security service designed to demonstrate production-grade auth flows, rate limiting, and abuse prevention mechanisms.
+A backend-focused authentication and security service designed to demonstrate production-grade authentication flows, rate limiting, and abuse prevention mechanisms.
 
-SentinelAuth is built as a standalone authentication service with an emphasis on system design, security, and scalability, rather than UI or framework-heavy abstractions.
+SentinelAuth is built as a standalone authentication service with a strong emphasis on system design, security, and scalability, rather than UI concerns or framework-heavy abstractions.
 
-Overview
+---
 
-Authentication systems are a critical attack surface in modern applications. SentinelAuth is an experimental backend project that focuses on:
+## Overview
 
-Secure user authentication
+Authentication systems are one of the most critical attack surfaces in modern applications. SentinelAuth is an experimental backend project that focuses on building secure authentication infrastructure from first principles.
 
-Rate limiting at multiple layers
+The project emphasizes:
 
-Brute-force and abuse protection
+* Secure user authentication flows
+* Rate limiting at multiple layers
+* Brute-force and abuse prevention
+* Clean separation of concerns between controllers, services, middleware, and infrastructure
 
-Clean separation of concerns between controllers, services, and infrastructure
+SentinelAuth intentionally avoids relying on third-party authentication platforms in order to deeply understand how authentication systems are designed, attacked, and hardened in real-world production environments.
 
-This project intentionally avoids relying on third-party auth platforms to deeply understand and implement authentication mechanics from first principles.
+---
 
-Key Features
-Authentication
+## Key Features
 
-Secure user signup with password hashing
+### Authentication
 
-Login flow with credential verification
+* Secure user signup with strong password hashing
+* Login flow with credential verification
+* Token-based authentication for stateless authorization
 
-Token-based authentication (stateless authorization)
+### Rate Limiting & Abuse Prevention
 
-Rate Limiting & Abuse Prevention
+* IP-based rate limiting for signup endpoints
+* Identity-aware rate limiting for login attempts
+* Failed login attempt tracking
+* Progressive throttling for repeated authentication failures
 
-IP-based rate limiting for signup
+### Security Design
 
-Identity-aware rate limiting for login
+* Clear separation between authentication and authorization
+* Middleware-based request protection
+* Designed to mitigate:
 
-Failed login attempt tracking
+  * Brute-force attacks
+  * Credential stuffing
+  * Bot-driven abuse
 
-Progressive throttling for repeated authentication failures
+---
 
-Security Design
+## System Design Philosophy
 
-Clear separation between authentication and authorization
+SentinelAuth is built around the following core principles:
 
-Middleware-based request protection
+### Defense in Depth
 
-Designed to mitigate:
+Multiple layers of protection are applied instead of relying on a single security control.
 
-Brute-force attacks
+### Separation of Concerns
 
-Credential stuffing
+* Controllers handle HTTP request/response logic only
+* Services contain authentication and security-related business logic
+* Middleware enforces authorization and identity validation
+* Infrastructure handles persistence, rate limiting, and external dependencies
 
-Bot-driven abuse
+### Explicit Trust Boundaries
 
-System Design Philosophy
+Authentication and authorization responsibilities are strictly separated to reduce blast radius and improve reasoning about security guarantees.
 
-SentinelAuth is built around the following principles:
+### Design Before Code
 
-Defense in Depth
-Multiple layers of protection rather than a single control.
+Every feature is introduced based on a threat model, abuse scenario, or scalability concern rather than convenience or boilerplate patterns.
 
-Separation of Concerns
-Controllers handle HTTP, services handle business logic, middleware handles authorization, and infrastructure handles persistence and limits.
+---
 
-Explicit Trust Boundaries
-Authentication and authorization responsibilities are strictly separated.
+## High-Level Architecture
 
-Design Before Code
-Each feature is introduced based on a threat model or scalability concern.
+### Controller Layer
 
-High-Level Architecture
+* Handles HTTP requests and responses
+* Performs input validation and delegates logic to services
+* Contains no business logic
 
-Controller Layer
-Handles HTTP requests and responses. No business logic.
+### Service Layer
 
-Service Layer
-Contains authentication logic, credential verification, and security decisions.
+* Implements authentication workflows
+* Handles credential verification and security decisions
+* Coordinates with persistence and rate-limiting modules
 
-Rate Limiter Module
-Centralized logic for tracking and enforcing request limits.
+### Rate Limiter Module
 
-Middleware Layer
-Responsible for request authorization and identity validation.
+* Centralized logic for tracking and enforcing request limits
+* Designed to support both IP-based and identity-based policies
 
-Persistence Layer
-Stores user data, hashed credentials, and security metadata.
+### Middleware Layer
 
-Rate Limiting Strategy
+* Enforces authorization for protected routes
+* Validates authentication tokens and request identity
+
+### Persistence Layer
+
+* Stores user records and hashed credentials
+* Maintains security metadata such as failed login counts
+
+---
+
+## Rate Limiting Strategy
 
 Different endpoints are protected using different rate-limiting policies based on their attack surface:
 
-Endpoint	Strategy
-Signup	IP-based limiting
-Login	Identity + IP-based limiting
-Authenticated APIs	Global request limiting
+| Endpoint           | Strategy                          |
+| ------------------ | --------------------------------- |
+| Signup             | IP-based rate limiting            |
+| Login              | Identity + IP-based rate limiting |
+| Authenticated APIs | Global request limiting           |
 
-This design reflects real-world security practices used in production systems.
+This approach mirrors real-world security practices used in production-grade authentication systems.
 
-Why This Project Exists
+---
 
-Most authentication tutorials focus on “how to log in a user.”
+## Why This Project Exists
+
+Most authentication tutorials focus on *how to log in a user*.
+
 SentinelAuth focuses on:
 
-Why auth systems fail
+* Why authentication systems fail
+* How attackers exploit login and signup endpoints
+* How backend engineers design resilient and abuse-resistant authentication services
 
-How attackers exploit login endpoints
+This project is intended as a learning and demonstration tool rather than a drop-in authentication library.
 
-How backend engineers design resilient authentication services
+---
 
-This project is intended as a learning and demonstration tool, not a drop-in auth library.
+## Future Enhancements
 
-Future Enhancements
+* Account lockout policies
+* Token rotation and revocation
+* Password reset and recovery flows
+* Audit logging and security event tracking
+* CAPTCHA integration
+* Distributed rate limiting using Redis
 
-Account lockout policies
+---
 
-Token rotation and revocation
+## Tech Stack
 
-Password reset flows
+* **Runtime:** Node.js
+* **Language:** TypeScript
+* **Database:** PostgreSQL
+* **ORM:** Drizzle
+* **Security:** bcrypt
+* **Architecture:** Layered backend design
 
-Audit logging
+---
 
-CAPTCHA integration
+## Disclaimer
 
-Distributed rate limiting (Redis-backed)
+This project is for educational and demonstration purposes only.
 
-Tech Stack
-
-Runtime: Node.js
-
-Language: TypeScript
-
-Database: PostgreSQL
-
-ORM: Prisma
-
-Security: bcrypt
-
-Architecture: Layered backend design
-
-Disclaimer
-
-This project is for educational and demonstration purposes.
-While it follows best practices, it is not intended for direct production use without further review and hardening.
+While it follows common industry best practices, it has not undergone a formal security audit and should not be used as-is in production environments without thorough review, testing, and hardening.
