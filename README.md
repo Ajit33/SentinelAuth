@@ -5,6 +5,7 @@ A backend-focused authentication and security service designed to demonstrate pr
 SentinelAuth is built as a standalone authentication service with a strong emphasis on system design, security, and scalability, rather than UI concerns or framework-heavy abstractions.
 
 ---
+<img width="1906" height="831" alt="image" src="https://github.com/user-attachments/assets/7ed73a1a-53f5-496d-877a-eb5a56d6617f" />
 
 ## Overview
 
