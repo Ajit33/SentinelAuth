@@ -56,7 +56,8 @@ export async function login(email:string,password:string){
        if(!isPasswordVaild){
         return {message:"Invalid email or password"}
        }
-        return {message:"Login successful"};
+        return {user,
+          message:"Login successful"};
     } catch (error) {
       return {message:"Login failed"};
     }
