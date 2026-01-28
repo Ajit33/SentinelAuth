@@ -8,6 +8,13 @@
       "when": 1769112210845,
       "tag": "0000_dark_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1769571866640,
+      "tag": "0001_complete_wiccan",
+      "breakpoints": true
     }
   ]
 }

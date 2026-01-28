@@ -1,17 +1,60 @@
 import { Request, Response } from "express";
 import * as authService from "./auth.service.js";
 import { authAttemptService } from "./security/auth-attempt.service.js";
+import { TokenService } from "./security/token.service.js";
+import { redis } from "../lib/redis.js";
 
 export async function register(req: Request, res: Response) {
-  const {name,age,email,password} = req.body;
-  if(!email || !password || !name ){
-    return res.status(401).json("register need all the mandatory fields")
+  const { name, age, email, password, role } = req.body;
+
+  if (!name || !email || !password || !role) {
+    return res.status(400).json({ message: "Missing required fields" });
   }
 
-  const result = await authService.register(name,age,email,password);
+  // 1. Create user
+  const user = await authService.register(name, age, email, password, role);
 
-  return res.status(200).json(result);
+  // 2. Issue tokens
+  const accessToken = TokenService.generateAccessToken({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
+
+  const refreshToken = TokenService.generateRefreshToken({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
+
+  // 3. Store refresh token (v1 simple model)
+  await redis.set(
+    `refreshToken:${user.id}`,
+    refreshToken,
+    "EX",
+    7 * 24 * 60 * 60 // 7 days
+  );
+
+  // 4. Set refresh token cookie
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  // 5. Return access token + user info
+  return res.status(201).json({
+    message: "Registration successful",
+    accessToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    },
+  });
 }
+
 
 export async function login(req:Request,res:Response){
      const {email,password}=req.body;
