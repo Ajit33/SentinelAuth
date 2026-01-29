@@ -7,6 +7,6 @@ const router = Router();
 router.post("/register",SignupRateLimiter(5, 15 * 60), authController.register);
 router.post("/login",authController.login);
 router.get("/profile",authenticateAccessToken, authController.getProfile);
-
+router.get("/refresh",authController.refreshToken);
 export default router;
 

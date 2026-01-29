@@ -4,7 +4,7 @@ import { authAttemptService } from "./security/auth-attempt.service.js";
 import { TokenService } from "./security/token.service.js";
 import { redis } from "../lib/redis.js";
 import { AuthenticatedRequest } from "../middleware/auth.middleware.js";
-
+import crypto from "crypto";
 export async function register(req: Request, res: Response) {
   const { name, age, email, password, role } = req.body;
 
@@ -33,7 +33,7 @@ export async function register(req: Request, res: Response) {
     `refreshToken:${user.id}`,
     refreshToken,
     "EX",
-    7 * 24 * 60 * 60 // 7 days
+    7 * 24 * 60 * 60, // 7 days
   );
 
   // 4. Set refresh token cookie
@@ -56,7 +56,6 @@ export async function register(req: Request, res: Response) {
   });
 }
 
-
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
 
@@ -75,8 +74,8 @@ export async function login(req: Request, res: Response) {
     }
 
     const result = await authService.login(email, password);
-     if(!result.user){
-      return res.status(401).json({message:"Invalid email or password"});
+    if (!result.user) {
+      return res.status(401).json({ message: "Invalid email or password" });
     }
     if (result.message !== "Login successful") {
       await authAttemptService.recordFailure(email);
@@ -85,7 +84,7 @@ export async function login(req: Request, res: Response) {
 
     // ✅ clear failed attempts
     await authAttemptService.clearFailures(email);
-   
+
     const user = result?.user;
 
     // ✅ token payload (minimal, stable identifiers only)
@@ -95,19 +94,21 @@ export async function login(req: Request, res: Response) {
       role: user.role,
     };
 
-    // ✅ generate tokens
+    
     const accessToken = TokenService.generateAccessToken(payload);
     const refreshToken = TokenService.generateRefreshToken(payload);
 
-    // ✅ store refresh token in Redis
+    const hashedRT = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
     await redis.set(
-      `refreshToken:${user?.email}`,
-      refreshToken,
+      `refreshToken:${user?.id}`,
+      hashedRT,
       "EX",
-      7 * 24 * 60 * 60 // seconds
+      7 * 24 * 60 * 60, // seconds
     );
 
-    // ✅ set refresh token cookie
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -126,9 +127,8 @@ export async function login(req: Request, res: Response) {
   }
 }
 
-
 export async function getProfile(req: AuthenticatedRequest, res: Response) {
-  const user = req.user; 
+  const user = req.user;
 
   if (!user) {
     return res.status(401).json({ message: "Unauthorized" });
@@ -139,4 +139,69 @@ export async function getProfile(req: AuthenticatedRequest, res: Response) {
     email: user.email,
     role: user.role,
   });
+}
+
+
+export async function refreshToken(req: Request, res: Response) {
+  const refreshToken = req.cookies.refreshToken;
+
+  if (!refreshToken) {
+    return res.status(401).json({ message: "Refresh token missing" });
+  }
+
+  try {
+    const decoded = TokenService.verifyRefreshToken(refreshToken);
+
+    const storedHash = await redis.get(
+      `refreshToken:${decoded.userId}`
+    );
+
+    const incomingHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    if (!storedHash || storedHash !== incomingHash) {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const newAccessToken = TokenService.generateAccessToken({
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+    });
+
+    const newRefreshToken = TokenService.generateRefreshToken({
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+    });
+
+    const newRefreshHash = crypto
+      .createHash("sha256")
+      .update(newRefreshToken)
+      .digest("hex");
+
+    await redis.set(
+      `refreshToken:${decoded.userId}`,
+      newRefreshHash,
+      "EX",
+      7 * 24 * 60 * 60
+    );
+
+    res.cookie("refreshToken", newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.status(200).json({
+      accessToken: newAccessToken,
+    });
+  } catch {
+    return res.status(401).json({
+      message: "Invalid or expired refresh token",
+    });
+  }
 }

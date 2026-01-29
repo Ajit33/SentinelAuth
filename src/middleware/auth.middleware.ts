@@ -1,14 +1,15 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { TokenPayload, TokenService } from "../auth/security/token.service.js";
 
-export interface JwtPayload {
-  userId: string;
-  email: string;
-  role: string;
-}
+// export interface JwtPayload {
+//   userId: string;
+//   email: string;
+//   role: string;
+// }
 
 export interface AuthenticatedRequest extends Request {
-  user?: JwtPayload;
+  user?:TokenPayload 
 }
 
 export function authenticateAccessToken(
@@ -24,10 +25,10 @@ export function authenticateAccessToken(
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(
+    const decoded = TokenService.verifyAccessToken(
       token,
-      process.env.ACCESS_TOKEN_SECRET!
-    ) as JwtPayload;
+    );
+   
 
     req.user = decoded;
     next();
