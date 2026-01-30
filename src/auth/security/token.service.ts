@@ -1,9 +1,17 @@
 import jwt, { SignOptions } from "jsonwebtoken";
+import strict from "node:assert/strict";
 
 export interface TokenPayload {
   userId: number;
   email: string;
   role?: string;
+}
+export interface RefreshTokenPayload{
+    userId: number;
+    email: string;
+    role?: string;
+    ip:string,
+    sessionId:string
 }
 
 export class TokenService {
@@ -29,7 +37,7 @@ export class TokenService {
   /**
    * Issue Refresh Token
    */
-  static generateRefreshToken(payload: TokenPayload): string {
+  static generateRefreshToken(payload: RefreshTokenPayload): string {
     const options: SignOptions = {
       expiresIn: this.refreshTokenExpiry as any,
       issuer: "sentinel-auth",
@@ -52,10 +60,10 @@ export class TokenService {
   /**
    * Verify Refresh Token
    */
-  static verifyRefreshToken(token: string): TokenPayload {
+  static verifyRefreshToken(token: string): RefreshTokenPayload {
     return jwt.verify(
       token,
       this.refreshTokenSecret
-    ) as TokenPayload;
+    ) as RefreshTokenPayload;
   }
 }

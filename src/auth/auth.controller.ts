@@ -5,12 +5,20 @@ import { TokenService } from "./security/token.service.js";
 import { redis } from "../lib/redis.js";
 import { AuthenticatedRequest } from "../middleware/auth.middleware.js";
 import crypto from "crypto";
+
 export async function register(req: Request, res: Response) {
   const { name, age, email, password, role } = req.body;
 
   if (!name || !email || !password || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
+  
+  const ip =
+    req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
+    req.socket.remoteAddress ||
+    "unknown";
+  
+  const sessionId = crypto.randomUUID();
 
   // 1. Create user
   const user = await authService.register(name, age, email, password, role);
@@ -26,12 +34,19 @@ export async function register(req: Request, res: Response) {
     userId: user.id,
     email: user.email,
     role: user.role,
+    ip: ip,
+    sessionId: sessionId
   });
 
-  // 3. Store refresh token (v1 simple model)
+  // 3. Store refresh token hash
+  const hashedRT = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+
   await redis.set(
-    `refreshToken:${user.id}`,
-    refreshToken,
+    `refreshToken:${user.id}:${sessionId}`,
+    hashedRT,
     "EX",
     7 * 24 * 60 * 60, // 7 days
   );
@@ -87,23 +102,41 @@ export async function login(req: Request, res: Response) {
 
     const user = result?.user;
 
+    // ✅ Extract IP address
+    const ip =
+      req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
+      req.socket.remoteAddress ||
+      "unknown";
+
+    // ✅ Generate unique session ID for this login
+    const sessionId = crypto.randomUUID();
+
     // ✅ token payload (minimal, stable identifiers only)
     const payload = {
       userId: user.id,
       email: user.email,
       role: user.role,
     };
-
+   
+    const refreshTokenPayload = {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      ip: ip,
+      sessionId: sessionId
+    };
     
     const accessToken = TokenService.generateAccessToken(payload);
-    const refreshToken = TokenService.generateRefreshToken(payload);
+    const refreshToken = TokenService.generateRefreshToken(refreshTokenPayload);
 
     const hashedRT = crypto
       .createHash("sha256")
       .update(refreshToken)
       .digest("hex");
+
+    // Store with sessionId in key for multi-session support
     await redis.set(
-      `refreshToken:${user?.id}`,
+      `refreshToken:${user.id}:${sessionId}`,
       hashedRT,
       "EX",
       7 * 24 * 60 * 60, // seconds
@@ -141,7 +174,6 @@ export async function getProfile(req: AuthenticatedRequest, res: Response) {
   });
 }
 
-
 export async function refreshToken(req: Request, res: Response) {
   const refreshToken = req.cookies.refreshToken;
 
@@ -152,8 +184,22 @@ export async function refreshToken(req: Request, res: Response) {
   try {
     const decoded = TokenService.verifyRefreshToken(refreshToken);
 
+    // Get IP from request
+    const currentIp =
+      req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
+      req.socket.remoteAddress ||
+      "unknown";
+
+    // Verify IP hasn't changed (optional security check)
+    if (decoded.ip !== currentIp) {
+      console.warn(`IP mismatch for user ${decoded.userId}: ${decoded.ip} vs ${currentIp}`);
+      // You can choose to reject or just log this
+      // return res.status(401).json({ message: "IP address mismatch" });
+    }
+
+    // Check stored hash using sessionId
     const storedHash = await redis.get(
-      `refreshToken:${decoded.userId}`
+      `refreshToken:${decoded.userId}:${decoded.sessionId}`
     );
 
     const incomingHash = crypto
@@ -171,10 +217,15 @@ export async function refreshToken(req: Request, res: Response) {
       role: decoded.role,
     });
 
+    // Generate new session ID for rotation
+    const newSessionId = crypto.randomUUID();
+
     const newRefreshToken = TokenService.generateRefreshToken({
       userId: decoded.userId,
       email: decoded.email,
       role: decoded.role,
+      ip: currentIp,
+      sessionId: newSessionId
     });
 
     const newRefreshHash = crypto
@@ -182,8 +233,12 @@ export async function refreshToken(req: Request, res: Response) {
       .update(newRefreshToken)
       .digest("hex");
 
+    // Delete old session
+    await redis.del(`refreshToken:${decoded.userId}:${decoded.sessionId}`);
+
+    // Store new session
     await redis.set(
-      `refreshToken:${decoded.userId}`,
+      `refreshToken:${decoded.userId}:${newSessionId}`,
       newRefreshHash,
       "EX",
       7 * 24 * 60 * 60
