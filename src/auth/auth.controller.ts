@@ -1,3 +1,5 @@
+// src/auth/auth.controller.ts
+
 import { Request, Response } from "express";
 import * as authService from "./auth.service.js";
 import { authAttemptService } from "./security/auth-attempt.service.js";
@@ -6,27 +8,72 @@ import { redis } from "../lib/redis.js";
 import { AuthenticatedRequest } from "../middleware/auth.middleware.js";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../email/email.service.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import {
+  BadRequestError,
+  ForbiddenError,
+  UnauthorizedError,
+} from "../utils/errors.js";
 
-export async function register(req: Request, res: Response) {
+export const register = asyncHandler(async (req: Request, res: Response) => {
   const { name, age, email, password, role } = req.body;
 
   if (!name || !email || !password || !role) {
-    return res.status(400).json({ message: "Missing required fields" });
+    throw new BadRequestError("Missing required fields");
   }
+
+  const user = await authService.register(name, age, email, password, role);
+
+  // Generate verification token
+  const verificationToken = crypto.randomBytes(32).toString("hex");
+
+  // Store in Redis
+  await redis.set(
+    `verification_token:${verificationToken}`,
+    user.id.toString(),
+    "EX",
+    24 * 60 * 60,
+  );
+
+  await sendVerificationEmail(email, verificationToken, name);
+
+  return res.status(201).json({
+    success: true,
+    message:
+      "Registration successful! Please check your email to verify your account.",
+    data: {
+      email: user.email,
+      isVerified: user.isVerified,
+    },
+  });
+});
+
+export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.query;
+
+  if (!token || typeof token !== "string") {
+    throw new BadRequestError("Verification token is required");
+  }
+
+  const userId = await redis.get(`verification_token:${token}`);
+
+  if (!userId) {
+    throw new BadRequestError("Invalid or expired verification token");
+  }
+
+  await authService.markUserAsVerified(parseInt(userId));
+
+  // Delete token
+  await redis.del(`verification_token:${token}`);
+
+  const user = await authService.getUserById(parseInt(userId));
 
   const ip =
     req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
     req.socket.remoteAddress ||
     "unknown";
-
   const sessionId = crypto.randomUUID();
 
-  // 1. Create user
-  const user = await authService.register(name, age, email, password, role);
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
-  }
-  // 2. Issue tokens
   const accessToken = TokenService.generateAccessToken({
     userId: user.id,
     email: user.email,
@@ -41,7 +88,6 @@ export async function register(req: Request, res: Response) {
     sessionId: sessionId,
   });
 
-  // 3. Store refresh token hash
   const hashedRT = crypto
     .createHash("sha256")
     .update(refreshToken)
@@ -51,172 +97,156 @@ export async function register(req: Request, res: Response) {
     `refreshToken:${user.id}:${sessionId}`,
     hashedRT,
     "EX",
-    7 * 24 * 60 * 60, // 7 days
+    7 * 24 * 60 * 60,
   );
 
-  // 4. Set refresh token cookie
   res.cookie("refreshToken", refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
-  const verificationToken = crypto.randomBytes(32).toString("hex");
-
-  await redis.set(
-    `verification_token:${verificationToken}`,
-    user.id.toString(),
-    "EX",
-    24 * 60 * 60,
-  );
-  try {
-    await sendVerificationEmail(email, verificationToken, name);
-    return res.status(201).json({
-      message: "Verification Mail sent to your email,Please verify Your Email",
-      accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        isverified:false
-      },
-    });
-  } catch (error) {
-     return res.status(500).json({
-      message: error,
-    });
-  }
-}
-
-export async function login(req: Request, res: Response) {
-  const { email, password } = req.body;
-
-  try {
-    if (!email || !password) {
-      return res.status(400).json({
-        message: "Please fill all the fields",
-      });
-    }
-
-    const isBlocked = await authAttemptService.isBlocked(email);
-    if (isBlocked) {
-      return res.status(429).json({
-        message: "Too many failed login attempts. Please try again later.",
-      });
-    }
-
-    const result = await authService.login(email, password);
-    if (!result.user) {
-      return res.status(401).json({ message: "Invalid email or password" });
-    }
-    if (result.message !== "Login successful") {
-      await authAttemptService.recordFailure(email);
-      return res.status(401).json(result);
-    }
-
-    // ✅ clear failed attempts
-    await authAttemptService.clearFailures(email);
-
-    const user = result?.user;
-
-    // ✅ Extract IP address
-    const ip =
-      req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
-      req.socket.remoteAddress ||
-      "unknown";
-
-    // ✅ Generate unique session ID for this login
-    const sessionId = crypto.randomUUID();
-
-    // ✅ token payload (minimal, stable identifiers only)
-    const payload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    };
-
-    const refreshTokenPayload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      ip: ip,
-      sessionId: sessionId,
-    };
-
-    const accessToken = TokenService.generateAccessToken(payload);
-    const refreshToken = TokenService.generateRefreshToken(refreshTokenPayload);
-
-    const hashedRT = crypto
-      .createHash("sha256")
-      .update(refreshToken)
-      .digest("hex");
-
-    // Store with sessionId in key for multi-session support
-    await redis.set(
-      `refreshToken:${user.id}:${sessionId}`,
-      hashedRT,
-      "EX",
-      7 * 24 * 60 * 60, // seconds
-    );
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    return res.status(200).json({
-      message: "Login successful",
-      accessToken,
-      user,
-    });
-  } catch (error) {
-    console.error("Login error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-}
-
-export async function getProfile(req: AuthenticatedRequest, res: Response) {
-  const user = req.user;
-
-  if (!user) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
 
   return res.status(200).json({
-    userId: user.userId,
+    success: true,
+    message: "Email verified successfully! You are now logged in.",
+    data: {
+      accessToken,
+      user,
+    },
+  });
+});
+
+export const login = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    throw new BadRequestError("Email and password are required");
+  }
+  const isBlocked = await authAttemptService.isBlocked(email);
+  if (isBlocked) {
+    throw new ForbiddenError(
+      "Too many failed login attempts. Please try again later.",
+    );
+  }
+  const user = await authService.login(email, password);
+  await authAttemptService.clearFailures(email);
+  if (!user.isVerified) {
+    throw new ForbiddenError(
+      "Please verify your email before logging in. Check your inbox for the verification link.",
+    );
+  }
+  const ip =
+    req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
+    req.socket.remoteAddress ||
+    "unknown";
+  const sessionId = crypto.randomUUID();
+
+  const accessToken = TokenService.generateAccessToken({
+    userId: user.id,
     email: user.email,
     role: user.role,
   });
-}
 
-export async function refreshToken(req: Request, res: Response) {
-  const refreshToken = req.cookies.refreshToken;
+  const refreshToken = TokenService.generateRefreshToken({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    ip: ip,
+    sessionId: sessionId,
+  });
+  const hashedRT = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
 
-  if (!refreshToken) {
-    return res.status(401).json({ message: "Refresh token missing" });
-  }
+  await redis.set(
+    `refreshToken:${user.id}:${sessionId}`,
+    hashedRT,
+    "EX",
+    7 * 24 * 60 * 60,
+  );
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
 
-  try {
+  return res.status(200).json({
+    success: true,
+    message: "Login successful",
+    data: {
+      accessToken,
+      user,
+    },
+  });
+});
+export const resendVerification = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new BadRequestError("Email is required");
+    }
+    const user = await authService.getUserByEmail(email);
+    if (user.isVerified) {
+      throw new BadRequestError("Email already verified. You can login now!");
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+
+    await redis.set(
+      `verification_token:${verificationToken}`,
+      user.id.toString(),
+      "EX",
+      24 * 60 * 60,
+    );
+
+    // Send email
+    await sendVerificationEmail(email, verificationToken, user.name);
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification email sent! Please check your inbox.",
+    });
+  },
+);
+export const getProfile = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user;
+
+    if (!user) {
+      throw new UnauthorizedError("Unauthorized");
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        userId: user.userId,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  },
+);
+export const refreshToken = asyncHandler(
+  async (req: Request, res: Response) => {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedError("Refresh token missing");
+    }
     const decoded = TokenService.verifyRefreshToken(refreshToken);
-
-    // Get IP from request
     const currentIp =
       req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
       req.socket.remoteAddress ||
       "unknown";
-
-    // Verify IP hasn't changed (optional security check)
     if (decoded.ip !== currentIp) {
       console.warn(
         `IP mismatch for user ${decoded.userId}: ${decoded.ip} vs ${currentIp}`,
       );
-      // You can choose to reject or just log this
-      // return res.status(401).json({ message: "IP address mismatch" });
     }
-
-    // Check stored hash using sessionId
     const storedHash = await redis.get(
       `refreshToken:${decoded.userId}:${decoded.sessionId}`,
     );
@@ -227,16 +257,16 @@ export async function refreshToken(req: Request, res: Response) {
       .digest("hex");
 
     if (!storedHash || storedHash !== incomingHash) {
-      return res.status(401).json({ message: "Invalid refresh token" });
+      throw new UnauthorizedError("Invalid refresh token");
     }
 
+    // Generate new tokens
     const newAccessToken = TokenService.generateAccessToken({
       userId: decoded.userId,
       email: decoded.email,
       role: decoded.role,
     });
 
-    // Generate new session ID for rotation
     const newSessionId = crypto.randomUUID();
 
     const newRefreshToken = TokenService.generateRefreshToken({
@@ -263,6 +293,7 @@ export async function refreshToken(req: Request, res: Response) {
       7 * 24 * 60 * 60,
     );
 
+    // Set cookie
     res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -271,11 +302,10 @@ export async function refreshToken(req: Request, res: Response) {
     });
 
     return res.status(200).json({
-      accessToken: newAccessToken,
+      success: true,
+      data: {
+        accessToken: newAccessToken,
+      },
     });
-  } catch {
-    return res.status(401).json({
-      message: "Invalid or expired refresh token",
-    });
-  }
-}
+  },
+);

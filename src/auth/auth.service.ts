@@ -1,30 +1,34 @@
+// src/auth/auth.service.ts
+
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { usersTable } from "../db/schema.js";
-import bcrypt from "bcrypt"
+import bcrypt from "bcrypt";
+import { 
+  ConflictError, 
+  UnauthorizedError, 
+  NotFoundError 
+} from "../utils/errors.js";
+
+/**
+ * Register new user
+ * @throws {ConflictError} If email already exists
+ */
 export async function register(
   name: string,
   age: number,
   email: string,
   password: string,
-  role: string,
+  role: string
 ) {
-  console.log("1111111111111111111111111")
-  // 1. Check existing user
-  let existingUser
-  try {
-   existingUser = await db
+  const existingUser = await db
     .select()
     .from(usersTable)
-    .where(eq(usersTable.email, email));
-  
-  console.log("Query executed successfully", existingUser);
-} catch (error) {
-  console.error("Detailed error:", error);
-  throw error;
-}
+    .where(eq(usersTable.email, email))
+    .limit(1);
+
   if (existingUser.length > 0) {
-    throw new Error("User already exists");
+    throw new ConflictError("Email already registered"); 
   }
 
   // 2. Hash password
@@ -33,7 +37,7 @@ export async function register(
     Number(process.env.BCRYPT_COST) || 10
   );
 
-  // 3. Insert + return user
+
   const [user] = await db
     .insert(usersTable)
     .values({
@@ -42,28 +46,112 @@ export async function register(
       email,
       password: hashedPassword,
       role,
+
     })
     .returning({
       id: usersTable.id,
+      name: usersTable.name,
       email: usersTable.email,
       role: usersTable.role,
+      isVerified: usersTable.isVerified,
     });
+
   return user;
-    
 }
-export async function login(email:string,password:string){
-    try {
-       const [user]=await db.select().from(usersTable).where(eq(usersTable.email,email)).limit(1);
-       if(!user){
-        return {message:"Invalid email or password"}
-       }
-       const isPasswordVaild=await bcrypt.compare(password,user.password);
-       if(!isPasswordVaild){
-        return {message:"Invalid email or password"}
-       }
-        return {user,
-          message:"Login successful"};
-    } catch (error) {
-      return {message:"Login failed"};
-    }
+
+/**
+ * Login user
+ * @throws {UnauthorizedError} If credentials are invalid
+ */
+export async function login(email: string, password: string) {
+  // ❌ REMOVE try-catch - let errors bubble up
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, email))
+    .limit(1);
+
+  if (!user) {
+    throw new UnauthorizedError("Invalid email or password"); 
+  }
+
+  // 2. Verify password
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+
+  if (!isPasswordValid) {
+    throw new UnauthorizedError("Invalid email or password");
+  }
+
+  
+  const { password: _, ...userWithoutPassword } = user;
+  return userWithoutPassword;
 }
+
+/**
+ * Mark user as verified
+ * @throws {NotFoundError} If user not found
+ */
+export async function markUserAsVerified(userId: number): Promise<void> {
+  const result = await db
+    .update(usersTable)
+    .set({ isVerified: true })
+    .where(eq(usersTable.id, userId))
+    .returning({ id: usersTable.id });
+   console.log(result)
+  if (result.length === 0) {
+    throw new NotFoundError("User not found"); 
+  }
+}
+
+/**
+ * Get user by ID
+ * @throws {NotFoundError} If user not found
+ */
+export async function getUserById(userId: number) {
+  const [user] = await db
+    .select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      role: usersTable.role,
+      isVerified: usersTable.isVerified,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+
+  if (!user) {
+    throw new NotFoundError("User not found");
+  }
+
+  return user;
+}
+
+/**
+ * Get user by email
+ * @throws {NotFoundError} If user not found
+ */
+export async function getUserByEmail(email: string) {
+  const [user] = await db
+    .select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      role: usersTable.role,
+      isVerified: usersTable.isVerified,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.email, email))
+    .limit(1);
+
+  if (!user) {
+    throw new NotFoundError("User not found"); 
+  }
+
+  return user;
+}
+
+
+
+

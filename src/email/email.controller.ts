@@ -1,22 +1,24 @@
 import { Request, Response } from "express";
 import { redis } from "../lib/redis.js"
 import crypto from "crypto";
+import { getUserById, markUserAsVerified } from "../auth/auth.service.js";
+import { TokenService } from "../auth/security/token.service.js";
 
 export const verifyEmail = async (req: Request, res: Response) => {
+  console.log("keyyyyy")
   try {
-    // ✅ 1. Get token from query params (not params!)
-    const { token } = req.query;
 
-    // ✅ 2. Validate token exists and is a string
+    const token = req.query.token;
+
+
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ 
         message: "Verification token is required" 
       });
     }
 
-    // ✅ 3. Get userId from Redis using the token
     const userId = await redis.get(`verification_token:${token}`);
-
+     console.log(userId)
     // ✅ 4. Check if token exists (not expired/invalid)
     if (!userId) {
       return res.status(400).json({ 
@@ -25,15 +27,13 @@ export const verifyEmail = async (req: Request, res: Response) => {
     }
 
     // ✅ 5. Mark user as verified in database
-    await authService.markUserAsVerified(parseInt(userId));
-
-    // ✅ 6. Delete the verification token (one-time use)
+    await markUserAsVerified(parseInt(userId));
     await redis.del(`verification_token:${token}`);
 
     // ✅ 7. Get updated user details
-    const user = await authService.getUserById(parseInt(userId));
+    const user = await getUserById(parseInt(userId));
     
-    if (!user) {
+    if (!user || Array.isArray(user) || 'message' in user) {
       return res.status(404).json({ message: "User not found" });
     }
 
