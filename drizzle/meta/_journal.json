@@ -15,6 +15,13 @@
       "when": 1769571866640,
       "tag": "0001_complete_wiccan",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770151532093,
+      "tag": "0002_misty_thanos",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { TokenService } from "./security/token.service.js";
 import { redis } from "../lib/redis.js";
 import { AuthenticatedRequest } from "../middleware/auth.middleware.js";
 import crypto from "crypto";
+import { sendVerificationEmail } from "../email/email.service.js";
 
 export async function register(req: Request, res: Response) {
   const { name, age, email, password, role } = req.body;
@@ -12,17 +13,19 @@ export async function register(req: Request, res: Response) {
   if (!name || !email || !password || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
-  
+
   const ip =
     req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
     req.socket.remoteAddress ||
     "unknown";
-  
+
   const sessionId = crypto.randomUUID();
 
   // 1. Create user
   const user = await authService.register(name, age, email, password, role);
-
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
   // 2. Issue tokens
   const accessToken = TokenService.generateAccessToken({
     userId: user.id,
@@ -35,7 +38,7 @@ export async function register(req: Request, res: Response) {
     email: user.email,
     role: user.role,
     ip: ip,
-    sessionId: sessionId
+    sessionId: sessionId,
   });
 
   // 3. Store refresh token hash
@@ -58,17 +61,31 @@ export async function register(req: Request, res: Response) {
     sameSite: "strict",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
+  const verificationToken = crypto.randomBytes(32).toString("hex");
 
-  // 5. Return access token + user info
-  return res.status(201).json({
-    message: "Registration successful",
-    accessToken,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    },
-  });
+  await redis.set(
+    `verification_token:${verificationToken}`,
+    user.id.toString(),
+    "EX",
+    24 * 60 * 60,
+  );
+  try {
+    await sendVerificationEmail(email, verificationToken, name);
+    return res.status(201).json({
+      message: "Verification Mail sent to your email,Please verify Your Email",
+      accessToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        isverified:false
+      },
+    });
+  } catch (error) {
+     return res.status(500).json({
+      message: error,
+    });
+  }
 }
 
 export async function login(req: Request, res: Response) {
@@ -117,15 +134,15 @@ export async function login(req: Request, res: Response) {
       email: user.email,
       role: user.role,
     };
-   
+
     const refreshTokenPayload = {
       userId: user.id,
       email: user.email,
       role: user.role,
       ip: ip,
-      sessionId: sessionId
+      sessionId: sessionId,
     };
-    
+
     const accessToken = TokenService.generateAccessToken(payload);
     const refreshToken = TokenService.generateRefreshToken(refreshTokenPayload);
 
@@ -192,14 +209,16 @@ export async function refreshToken(req: Request, res: Response) {
 
     // Verify IP hasn't changed (optional security check)
     if (decoded.ip !== currentIp) {
-      console.warn(`IP mismatch for user ${decoded.userId}: ${decoded.ip} vs ${currentIp}`);
+      console.warn(
+        `IP mismatch for user ${decoded.userId}: ${decoded.ip} vs ${currentIp}`,
+      );
       // You can choose to reject or just log this
       // return res.status(401).json({ message: "IP address mismatch" });
     }
 
     // Check stored hash using sessionId
     const storedHash = await redis.get(
-      `refreshToken:${decoded.userId}:${decoded.sessionId}`
+      `refreshToken:${decoded.userId}:${decoded.sessionId}`,
     );
 
     const incomingHash = crypto
@@ -225,7 +244,7 @@ export async function refreshToken(req: Request, res: Response) {
       email: decoded.email,
       role: decoded.role,
       ip: currentIp,
-      sessionId: newSessionId
+      sessionId: newSessionId,
     });
 
     const newRefreshHash = crypto
@@ -241,7 +260,7 @@ export async function refreshToken(req: Request, res: Response) {
       `refreshToken:${decoded.userId}:${newSessionId}`,
       newRefreshHash,
       "EX",
-      7 * 24 * 60 * 60
+      7 * 24 * 60 * 60,
     );
 
     res.cookie("refreshToken", newRefreshToken, {

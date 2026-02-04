@@ -7,15 +7,22 @@ export async function register(
   age: number,
   email: string,
   password: string,
-  role: string
+  role: string,
 ) {
+  console.log("1111111111111111111111111")
   // 1. Check existing user
-  const existingUser = await db
+  let existingUser
+  try {
+   existingUser = await db
     .select()
     .from(usersTable)
-    .where(eq(usersTable.email, email))
-    .limit(1);
-
+    .where(eq(usersTable.email, email));
+  
+  console.log("Query executed successfully", existingUser);
+} catch (error) {
+  console.error("Detailed error:", error);
+  throw error;
+}
   if (existingUser.length > 0) {
     throw new Error("User already exists");
   }
@@ -41,11 +48,9 @@ export async function register(
       email: usersTable.email,
       role: usersTable.role,
     });
-
   return user;
+    
 }
-
-
 export async function login(email:string,password:string){
     try {
        const [user]=await db.select().from(usersTable).where(eq(usersTable.email,email)).limit(1);
