@@ -309,3 +309,12 @@ export const refreshToken = asyncHandler(
     });
   },
 );
+
+export const forgetpassword=asyncHandler(
+  async(req:Request,res:Response)=>{    
+  }
+)
+
+
+
+
