@@ -9,6 +9,8 @@ import { AuthenticatedRequest } from "../middleware/auth.middleware.js";
 import crypto from "crypto";
 import { sendVerificationEmail } from "../email/email.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendEmail } from "../email/sendemail.js";
+import bycrypt from "bcrypt";
 import {
   BadRequestError,
   ForbiddenError,
@@ -310,10 +312,96 @@ export const refreshToken = asyncHandler(
   },
 );
 
-export const forgetpassword=asyncHandler(
-  async(req:Request,res:Response)=>{    
+
+
+export const forgotPassword = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new BadRequestError("Email is required");
+    }
+
+    const user = await authService.getUserByEmail(email);
+    if (!user) {
+      // Prevent email enumeration
+      return res.status(200).json({
+        message: "If the email exists, a reset link has been sent",
+      });
+    }
+
+    // Generate token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+
+    // Hash token before storing
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
+
+    // Store in Redis (1 hour expiry)
+    await redis.set(
+      `password_reset_token:${hashedToken}`,
+      user.id.toString(),
+      "EX",
+      60 * 60
+    );
+
+    // Reset URL
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+    // Send email
+    await sendEmail({
+      to: user.email,
+      subject: "Reset your password",
+      html: `
+        <p>You requested a password reset</p>
+        <p>Click below to reset your password:</p>
+        <a href="${resetUrl}">${resetUrl}</a>
+        <p>This link expires in 1 hour.</p>
+      `,
+    });
+
+    res.status(200).json({
+      message: "Password reset link sent successfully",
+    });
   }
-)
+);
+
+
+export const resetPassword = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      throw new BadRequestError("Token and password are required");
+    }
+
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
+
+    const userId = await redis.get(
+      `password_reset_token:${hashedToken}`
+    );
+
+    if (!userId) {
+      throw new BadRequestError("Invalid or expired token");
+    }
+
+    const hashedPassword = await bycrypt.hash(newPassword, 10);
+
+    await authService.updatePassword(Number(userId), hashedPassword);
+
+    await redis.del(`password_reset_token:${hashedToken}`);
+
+    res.status(200).json({
+      message: "Password reset successful",
+    });
+  }
+);
+
 
 
 

@@ -152,6 +152,24 @@ export async function getUserByEmail(email: string) {
   return user;
 }
 
+export const updatePassword = async (
+  userId: number,
+  hashedPassword: string
+) => {
+  const [updatedUser] = await db
+    .update(usersTable)
+    .set({
+      password: hashedPassword,
+      
+    })
+    .where(eq(usersTable.id, userId))
+    .returning({
+      id: usersTable.id,
+      email: usersTable.email,
+    });
+
+  return updatedUser;
+};
 
 
 
