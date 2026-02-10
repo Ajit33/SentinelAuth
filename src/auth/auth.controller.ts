@@ -348,7 +348,7 @@ export const forgotPassword = asyncHandler(
     );
 
     // Reset URL
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.URL}/reset-password?token=${resetToken}`;
 
     // Send email
     await sendEmail({
@@ -402,7 +402,20 @@ export const resetPassword = asyncHandler(
   }
 );
 
+export const logout = asyncHandler(async (req: Request, res: Response) => {
+  const refreshToken = req.cookies?.refreshToken
 
+  if (refreshToken) {
+    await authService.logoutService(refreshToken)
+  }
 
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+  })
+
+  return res.status(204).send()
+})
 
 

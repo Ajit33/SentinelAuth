@@ -9,7 +9,9 @@ import {
   UnauthorizedError, 
   NotFoundError 
 } from "../utils/errors.js";
-
+import { RefreshTokenPayload } from "./security/token.service.js";
+import jwt from "jsonwebtoken";
+import { redis } from "../lib/redis.js";
 /**
  * Register new user
  * @throws {ConflictError} If email already exists
@@ -64,7 +66,7 @@ export async function register(
  * @throws {UnauthorizedError} If credentials are invalid
  */
 export async function login(email: string, password: string) {
-  // ❌ REMOVE try-catch - let errors bubble up
+
 
   const [user] = await db
     .select()
@@ -173,3 +175,21 @@ export const updatePassword = async (
 
 
 
+export const logoutService = async (refreshToken: string) => {
+  let payload: RefreshTokenPayload
+
+  try {
+    payload = jwt.verify(
+      refreshToken,
+      process.env.REFRESH_TOKEN_SECRET!
+    ) as RefreshTokenPayload
+  } catch {
+    // Token invalid / expired → nothing to revoke
+    return
+  }
+
+  const { userId, sessionId } = payload
+
+  // Remove refresh token session from Redis
+  await redis.del(`refreshToken:${userId}:${sessionId}`)
+}
